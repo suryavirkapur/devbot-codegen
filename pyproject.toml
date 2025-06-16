@@ -1,0 +1,11 @@
+[project]
+name = "devbot2"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "chonkie>=1.0.10",
+    "openai>=1.86.0",
+    "robyn>=0.68.0",
+]
