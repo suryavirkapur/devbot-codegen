@@ -1,6 +1,6 @@
 from openai import OpenAI
 
-client = OpenAI()
+client = OpenAI(api_key="xxx")
 
 
 def generate_text(prompt: str) -> str:
