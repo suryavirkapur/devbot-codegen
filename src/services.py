@@ -4,7 +4,7 @@ import shutil
 
 from pathlib import Path
 from typing import TypeVar, Type, List, Dict
-from openai import OpenAI, AzureOpenAI
+from openai import OpenAI, AzureOpenAI, responses
 import config
 
 import models
@@ -34,21 +34,16 @@ async def generate_structured_openai_response(prompt: str, response_model: Type[
                 {"role": "system", "content": f"You are a helpful assistant. Please respond in JSON format matching the following Pydantic schema: {response_model.model_json_schema()}"},
                 {"role": "user", "content": prompt}
             ],
-            response_format={"type": "json_object"} # Use JSON mode
+            text_format=response_model
         )
 
-        content = completion.choices[0].message.content
+        content = completion.output_parsed
 
         if not content:
             raise ValueError("OpenAI returned empty content.")
 
-        try:
-            json_data = json.loads(content)
-        except json.JSONDecodeError as e:
-            print(f"Failed to parse AI response as JSON: {content}")
-            raise ValueError(f"AI response was not valid JSON. Error: {e}") from e
 
-        return response_model.model_validate(json_data)
+        return response_model.model_validate(content)
 
     except Exception as e:
         print(f"Error in generate_structured_openai_response: {e}")
