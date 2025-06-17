@@ -2,7 +2,7 @@
 import os
 from robyn import Robyn, Request,  jsonify
 from pydantic import ValidationError
-from typing import TypeVar, Union
+from typing import TypeVar
 from uuid import uuid4
 from datetime import datetime
 import json
