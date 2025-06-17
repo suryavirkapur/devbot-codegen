@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Literal
 from uuid import UUID, uuid4
 from datetime import datetime
+import json
 
 # Enums
 AuthType = Literal["none", "basic", "oauth", "jwt"]
@@ -16,8 +17,8 @@ class CoreFeature(BaseModel):
 class DataModel(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     name: str = Field(min_length=1)
-    fields: str # Could be a structured dict or list in a more advanced version
-    relationships: str # Could be a structured dict or list
+    fields: str
+    relationships: str
 
 class TechnologyStack(BaseModel):
     frontend: List[str] = Field(default_factory=list)
@@ -26,17 +27,45 @@ class TechnologyStack(BaseModel):
     other: List[str] = Field(default_factory=list)
 
 class BRDBase(BaseModel):
-    projectName: str = Field(min_length=1, alias="projectName")
-    projectDescription: str = Field(min_length=1, alias="projectDescription")
+    projectName: str = Field(min_length=1)
+    projectDescription: str = ""
     technologyStack: TechnologyStack = Field(default_factory=TechnologyStack)
-    coreFeatures: List[CoreFeature] = Field(default_factory=list)
-    dataModels: List[DataModel] = Field(default_factory=list)
+    coreFeatures: List[CoreFeature] = []
+    dataModels: List[DataModel] = []
     authentication: AuthType = "none"
-    apiRequirements: List[str] = Field(default_factory=list)
+    apiRequirements: List[str] = []
     additionalRequirements: Optional[str] = None
 
+    @field_validator('technologyStack', mode='before')
+    @classmethod
+    def parse_technology_stack(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
+
+    @field_validator('coreFeatures', mode='before')
+    @classmethod
+    def parse_core_features(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
+
+    @field_validator('dataModels', mode='before')
+    @classmethod
+    def parse_data_models(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
+
+    @field_validator('apiRequirements', mode='before')
+    @classmethod
+    def parse_api_requirements(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
+
     class Config:
-        populate_by_name = True # Allows using alias for field names
+        populate_by_name = True
 
 class BRD(BRDBase):
     id: UUID = Field(default_factory=uuid4)
@@ -46,19 +75,45 @@ class BRD(BRDBase):
 class BRDCreatePayload(BRDBase):
     pass
 
-class BRDUpdatePayload(BRDBase):
-    projectName: str = ""
-    projectDescription: str = ""
-    technologyStack: TechnologyStack = TechnologyStack()
-    coreFeatures: List[CoreFeature] = []
-    dataModels: List[DataModel] = []
-    authentication: AuthType = "none"
-    apiRequirements: List[str] = []
+class BRDUpdatePayload(BaseModel):
+    projectName: Optional[str] = None
+    projectDescription: Optional[str] = None
+    technologyStack: Optional[TechnologyStack] = None
+    coreFeatures: Optional[List[CoreFeature]] = None
+    dataModels: Optional[List[DataModel]] = None
+    authentication: Optional[AuthType] = None
+    apiRequirements: Optional[List[str]] = None
+    additionalRequirements: Optional[str] = None
 
-class BRDTextCreatePayload(BaseModel):
-    businessInfo: str = Field(min_length=1)
+    @field_validator('technologyStack', mode='before')
+    @classmethod
+    def parse_technology_stack(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
 
-# For brdGenerateRepo.ts DependencyOrderSchema
+    @field_validator('coreFeatures', mode='before')
+    @classmethod
+    def parse_core_features(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
+
+    @field_validator('dataModels', mode='before')
+    @classmethod
+    def parse_data_models(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
+
+    @field_validator('apiRequirements', mode='before')
+    @classmethod
+    def parse_api_requirements(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
+
+
 class FileDependencyInfo(BaseModel):
     path: str = Field(description="The full path of the file to be created, relative to the project root.")
     description: str = Field(description="A detailed description of the code or content that should be in this file.")

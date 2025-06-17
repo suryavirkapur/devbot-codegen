@@ -1,10 +1,10 @@
-import json
+
 import os
 import shutil
 
 from pathlib import Path
 from typing import TypeVar, Type, List, Dict
-from openai import OpenAI, AzureOpenAI, responses
+from openai import OpenAI, AzureOpenAI
 import config
 
 import models
@@ -17,7 +17,7 @@ if os.getenv("AZURE_OPENAI_ENDPOINT"): # Example condition to use Azure
     )
 
 else:
-    client = OpenAI(api_key=config.OPENAI_API_KEY, base_url="https://openai-proxy.svk77.com")
+    client = OpenAI(api_key=config.OPENAI_API_KEY, base_url="https://openai-proxy.svk77.com/v1")
 
 
 T = TypeVar('T', bound=models.BaseModel)
