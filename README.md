@@ -2,7 +2,6 @@
 
 We figured it would be much easier using Python for AI/ML integrations. Hence we are rewriting the backend and flows of the Devbot project in Python using the Robyn Web Framework.
 
-<<<<<<< HEAD
 ## Setup
 
 Ensure that you have UV installed, you can learn to do so [here](https://docs.astral.sh/uv/getting-started/installation/).
@@ -15,4 +14,3 @@ Ensure that you have UV installed, you can learn to do so [here](https://docs.as
 - [] Figure out how pydantic works
 - [] Fix Validations
 - [] Code-Debug-Text loop using Docker
->>>>>>> 2bea313 (update code)
