@@ -42,7 +42,8 @@ async def health(request: Request):
 
 @app.post("/api/brds")
 async def create_brd_endpoint(request: Request):
-    validated_data = await validate_request_body(request, models.BRDCreatePayload)
+    data = request.json()
+    validated_data = models.BRDCreatePayload.model_validate(data);
     if isinstance(validated_data, (ValidationError, ValueError)):
         error_details = validated_data.errors() if isinstance(validated_data, ValidationError) else str(validated_data)
         return {
@@ -53,13 +54,10 @@ async def create_brd_endpoint(request: Request):
 
 
     try:
-
         improved_brd_payload = await services.improve_brd_with_ai(validated_data)
         final_brd_data = improved_brd_payload
 
-
        # final_brd_data = validated_data
-
         new_brd = models.BRD(
             **final_brd_data.model_dump(),
             id=uuid4(),
@@ -69,8 +67,6 @@ async def create_brd_endpoint(request: Request):
 
         print("--- Valid BRD Data Received & Processed ---")
         print(json.dumps(new_brd.model_dump(mode='json'), indent=2))
-
-
         return {
             "status_code":201,
             "message": "BRD Created successfully!",
@@ -84,8 +80,6 @@ async def create_brd_endpoint(request: Request):
             "message": "Failed to create BRD",
             "error": str(e)
         }
-
-
 
 @app.post("/api/brds/create-from-text")
 async def create_brd_from_text_endpoint(request: Request):

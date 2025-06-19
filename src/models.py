@@ -114,6 +114,9 @@ class BRDUpdatePayload(BaseModel):
         return v
 
 
+class BRDTextCreatePayload(BaseModel):
+    businessInfo: str =  Field(min_length=5)
+
 class FileDependencyInfo(BaseModel):
     path: str = Field(description="The full path of the file to be created, relative to the project root.")
     description: str = Field(description="A detailed description of the code or content that should be in this file.")
