@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, field_validator
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Dict
 from uuid import UUID, uuid4
 from datetime import datetime
 import json
@@ -179,3 +179,26 @@ class MultiAgentSession(BaseModel):
     project_context: str = Field(description="Context about the project being worked on")
     agent_calls: List[AIAgentCall] = Field(default_factory=list, description="History of AI agent calls")
     current_phase: str = Field(default="generation", description="Current phase: generation, debugging, validation, optimization")
+
+class UnifiedProjectRequest(BaseModel):
+    businessRequirement: str = Field(min_length=10, description="Business requirement as text or markdown")
+    projectName: Optional[str] = Field(default=None, description="Optional project name override")
+    additionalInstructions: Optional[str] = Field(default=None, description="Additional instructions for code generation")
+
+class ProjectGenerationResult(BaseModel):
+    success: bool = Field(description="Whether the project generation was successful")
+    project_name: str = Field(description="Name of the generated project")
+    brd_data: BRDCreatePayload = Field(description="Generated Business Requirements Document")
+    zip_file_path: str = Field(description="Path to the generated zip file")
+    generation_time_seconds: float = Field(description="Total time taken for generation")
+    validation_report: Optional[ValidationReport] = Field(default=None, description="Validation test results")
+    debug_attempts: int = Field(default=0, description="Number of debug attempts made")
+    total_files_generated: int = Field(description="Total number of files generated")
+    ai_agent_calls: int = Field(description="Total number of AI agent calls made")
+    
+class ProjectGenerationError(BaseModel):
+    success: bool = Field(default=False)
+    error_type: str = Field(description="Type of error that occurred")
+    error_message: str = Field(description="Detailed error message")
+    stage: str = Field(description="Stage where the error occurred")
+    partial_results: Optional[Dict] = Field(default=None, description="Any partial results if available")

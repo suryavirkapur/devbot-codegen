@@ -3,14 +3,13 @@ import shutil
 import subprocess
 import asyncio
 import json
-import time
+import zipfile
 from datetime import datetime
 
 from pathlib import Path
 from typing import TypeVar, Type, List, Dict, Optional, Tuple
 from openai import OpenAI, AzureOpenAI
 import config
-
 import models
 
 if os.getenv("AZURE_OPENAI_ENDPOINT"): # Example condition to use Azure
@@ -21,7 +20,7 @@ if os.getenv("AZURE_OPENAI_ENDPOINT"): # Example condition to use Azure
     )
 
 else:
-    client = OpenAI(api_key=config.OPENAI_API_KEY, base_url="https://openai-proxy.svk77.com/v1")
+    client = OpenAI(api_key=config.OPENAI_API_KEY, base_url="http://0.0.0.0:11437/v1")
 
 
 T = TypeVar('T', bound=models.BaseModel)
@@ -84,7 +83,7 @@ async def summarize_file_content(file_path: str, content: str, model_name: str =
     """
     # Determine file type for specialized summarization
     file_extension = Path(file_path).suffix.lower()
-    
+
     if file_extension in ['.py', '.js', '.ts', '.go', '.rs', '.java', '.cpp', '.c']:
         system_prompt = """You are a code analysis assistant. Summarize the provided code file by extracting:
         1. Main purpose and functionality
@@ -120,7 +119,7 @@ async def summarize_file_content(file_path: str, content: str, model_name: str =
         2. Key sections or components
         3. Important configuration or data
         Keep the summary concise (200-300 words max)."""
-    
+
     try:
         completion = client.chat.completions.create(
             model=model_name,
@@ -129,13 +128,13 @@ async def summarize_file_content(file_path: str, content: str, model_name: str =
                 {"role": "user", "content": f"Summarize this file ({file_path}):\n\n{content}"}
             ]
         )
-        
+
         summary = completion.choices[0].message.content
         if not summary:
             return f"File: {file_path} (Content length: {len(content)} chars) - Summary generation failed"
-            
+
         return f"### FILE SUMMARY: {file_path}\n{summary.strip()}"
-        
+
     except Exception as e:
         print(f"Error summarizing file {file_path}: {e}")
         # Fallback to basic info
@@ -259,7 +258,7 @@ async def run_docker_based_tests(project_path: Path, project_slug: str) -> Tuple
         return False, logs
 
 
-async def enhanced_debug_code_with_ai(project_path: Path, brd_data: models.BRDCreatePayload, 
+async def enhanced_debug_code_with_ai(project_path: Path, brd_data: models.BRDCreatePayload,
                                      error_logs: str, debug_session: models.DebugSession,
                                      session: models.MultiAgentSession) -> List[str]:
     """
@@ -316,25 +315,25 @@ async def enhanced_debug_code_with_ai(project_path: Path, brd_data: models.BRDCr
 
     debug_prompt = f"""
     You are an expert debugging agent specializing in {current_strategy}. The Docker build for this generated project failed.
-    
+
     **Current Strategy:** {strategy_prompts[current_strategy]}
-    
+
     **Docker Build Error Logs:**
     ```
     {error_logs}
     ```
-    
+
     {previous_attempts_summary}
-    
+
     **Project BRD (for context):**
     {brd_data.model_dump_json(indent=2)}
-    
+
     **Project Files:**
     {files_str}
-    
+
     Based on your specialized analysis and the previous attempts, provide targeted file updates to fix the build.
     Be specific about what strategy you're applying and why it should work better than previous attempts.
-    
+
     Return the result as a JSON object matching the `DebuggingUpdate` schema.
     """
 
@@ -419,14 +418,14 @@ async def generate_repository_files(brd_data: models.BRDCreatePayload) -> str:
 
     Return the file structure as a JSON object matching the DependencyOrder schema.
     """
-    
+
     dependency_structure, _ = await call_ai_agent(
         agent_type="structure_generator",
         prompt=structure_prompt,
         response_model=models.DependencyOrder,
         session=session
     )
-    
+
     print("--- Generated Project Structure with Dependencies ---")
     print(dependency_structure.model_dump_json(indent=2))
 
@@ -456,34 +455,34 @@ async def generate_repository_files(brd_data: models.BRDCreatePayload) -> str:
                 summary = await summarize_file_content(path, content)
                 generated_file_summaries[path] = summary
                 context_parts.append(summary)
-        
+
         context_string = "\n\n".join(context_parts) if context_parts else "No relevant files have been created yet."
 
         file_gen_prompt = f"""
         Generate the complete and raw source code/content for the file: {file_info.path}
         File Description: {file_info.description}
         Overall Project BRD: {brd_string}
-        
+
         Previously Generated Files Context (Summaries):
         {context_string}
-        
+
         Based on the file summaries above, ensure your generated code:
         - Integrates properly with existing files and their functionality
         - Uses consistent naming conventions and patterns
         - Imports and references the correct modules/functions from other files
         - Follows the established architecture and design patterns
         - Maintains consistency with the technology stack and dependencies
-        
+
         Code Quality Guidelines:
         - Follow language-specific conventions
         - Include proper error handling
         - Add necessary imports and dependencies
         - Use production-ready patterns
         - Include basic logging where appropriate
-        
+
         Important: Output ONLY the raw content for '{file_info.path}'. Do not include explanations or markdown fences.
         """
-        
+
         print(f"Generating content for {file_info.path}...")
         print(f"  Context includes summaries of {len(context_parts)} previously generated files")
         file_content, _ = await call_ai_agent(
@@ -517,12 +516,12 @@ async def generate_repository_files(brd_data: models.BRDCreatePayload) -> str:
             # Mark the last attempt as successful if there were any
             if debug_session.attempts:
                 debug_session.attempts[-1].success = True
-            
+
             print("\n--- Docker build successful! Moving to validation phase. ---")
             break
 
         print("\n--- Docker build failed. Initiating enhanced AI debugging... ---")
-        
+
         if debug_session.current_attempt < debug_session.max_attempts - 1:
             try:
                 modified_files = await enhanced_debug_code_with_ai(
@@ -542,47 +541,47 @@ async def generate_repository_files(brd_data: models.BRDCreatePayload) -> str:
     # Step 5: Validation Phase with AI Agent
     session.current_phase = "validation"
     print("\n--- Starting Validation Phase ---")
-    
+
     try:
         # Create validation plan
         validation_plan = await create_validation_plan(project_path, brd_data, session)
         print(f"Created validation plan with {len(validation_plan.tests)} tests")
-        
+
         # Run validation tests
         validation_report = await run_validation_tests(project_path, validation_plan, session)
-        
+
         print(f"\n--- Validation Results ---")
         print(f"Overall Success: {'✅' if validation_report.overall_success else '❌'}")
-        
+
         for result in validation_report.results:
             status = "✅" if result.success else "❌"
             print(f"{status} {result.test_type}")
             if not result.success and result.error_message:
                 print(f"  Error: {result.error_message}")
-        
+
         if validation_report.recommendations:
             print("\n--- Recommendations ---")
             for rec in validation_report.recommendations:
                 print(f"• {rec}")
-        
+
         # Save validation report
         report_path = project_path / "validation_report.json"
         with open(report_path, "w") as f:
             f.write(validation_report.model_dump_json(indent=2))
-        
+
         print(f"\n--- Repository Generation Complete ---")
         print(f"Project Path: {project_path}")
         print(f"Validation Report: {report_path}")
         print(f"Total AI Agent Calls: {len(session.agent_calls)}")
-        
+
         return str(project_path)
-        
+
     except Exception as e:
         print(f"Validation phase failed: {e}")
         print("Project generated successfully but validation could not be completed.")
         return str(project_path)
 
-async def call_ai_agent(agent_type: str, prompt: str, response_model: Optional[Type[T]] = None, 
+async def call_ai_agent(agent_type: str, prompt: str, response_model: Optional[Type[T]] = None,
                        session: Optional[models.MultiAgentSession] = None, model_name: str = config.DEFAULT_MODEL) -> Tuple[T, models.AIAgentCall]:
     """
     Enhanced AI agent call with tracking and session management.
@@ -628,7 +627,7 @@ async def call_ai_agent(agent_type: str, prompt: str, response_model: Optional[T
         print(f"Error in AI agent call ({agent_type}): {e}")
         raise
 
-async def create_validation_plan(project_path: Path, brd_data: models.BRDCreatePayload, 
+async def create_validation_plan(project_path: Path, brd_data: models.BRDCreatePayload,
                                 session: models.MultiAgentSession) -> models.ValidationPlan:
     """
     Creates a comprehensive validation plan based on the project type and BRD requirements.
@@ -649,31 +648,31 @@ async def create_validation_plan(project_path: Path, brd_data: models.BRDCreateP
             except Exception as e:
                 print(f"Warning: Could not read file {file_path}: {e}")
 
-    files_str = "\n\n".join([f"### `/{path}`\n\n```\n{content[:1000]}...\n```" 
+    files_str = "\n\n".join([f"### `/{path}`\n\n```\n{content[:1000]}...\n```"
                            for path, content in project_files.items()])
 
     validation_prompt = f"""
     You are a validation planning agent. Create a comprehensive test plan for this generated project.
-    
+
     **Project BRD:**
     {brd_data.model_dump_json(indent=2)}
-    
+
     **Project Structure:**
     {files_str}
-    
+
     Based on the project type, technology stack, and features, create validation tests that include:
     1. Build/compilation verification
     2. Basic functionality tests
     3. API endpoint tests (if applicable)
     4. Database connectivity tests (if applicable)
     5. Integration tests for core features
-    
+
     Consider the technology stack and create appropriate test commands. For example:
     - For Python/FastAPI: pytest commands, curl tests for endpoints
     - For Node.js: npm test, endpoint testing
     - For Go: go test, build verification
     - For Docker: container health checks
-    
+
     Return a comprehensive validation plan as JSON matching the ValidationPlan schema.
     """
 
@@ -714,7 +713,7 @@ async def run_validation_tests(project_path: Path, validation_plan: models.Valid
     # Run each validation test
     for test in validation_plan.tests:
         print(f"Running {test.test_type} test: {test.test_command}")
-        
+
         try:
             process = await asyncio.create_subprocess_shell(
                 test.test_command,
@@ -722,10 +721,10 @@ async def run_validation_tests(project_path: Path, validation_plan: models.Valid
                 stderr=subprocess.PIPE,
                 cwd=str(project_path)
             )
-            
+
             try:
                 stdout, stderr = await asyncio.wait_for(
-                    process.communicate(), 
+                    process.communicate(),
                     timeout=test.timeout
                 )
             except asyncio.TimeoutError:
@@ -778,21 +777,21 @@ async def run_validation_tests(project_path: Path, validation_plan: models.Valid
 
     # Analyze results and generate recommendations
     overall_success = all(result.success for result in results)
-    
+
     # Generate recommendations using AI
     failed_tests = [r for r in results if not r.success]
     recommendations = []
-    
+
     if failed_tests:
         recommendations_prompt = f"""
         The following validation tests failed for the generated project:
-        
+
         {json.dumps([{"test_type": r.test_type, "error": r.error_message, "output": r.output} for r in failed_tests], indent=2)}
-        
+
         Provide specific recommendations to fix these issues. Focus on actionable steps.
         Return as a JSON list of recommendation strings.
         """
-        
+
         try:
             recs_response, agent_call = await call_ai_agent(
                 agent_type="recommendations_generator",
@@ -812,3 +811,142 @@ async def run_validation_tests(project_path: Path, validation_plan: models.Valid
         results=results,
         recommendations=recommendations
     )
+
+def create_project_zip(project_path: Path, zip_name: str) -> str:
+    """
+    Creates a zip file of the generated project.
+    Returns the path to the created zip file.
+    """
+    zip_path = project_path.parent / f"{zip_name}.zip"
+
+    try:
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for root, dirs, files in os.walk(project_path):
+                for file in files:
+                    file_path = Path(root) / file
+                    # Calculate relative path from project root
+                    relative_path = file_path.relative_to(project_path)
+                    zipf.write(file_path, relative_path)
+
+        print(f"Created zip file: {zip_path}")
+        return str(zip_path)
+
+    except Exception as e:
+        print(f"Error creating zip file: {e}")
+        raise
+
+async def unified_project_generation(request: models.UnifiedProjectRequest) -> models.ProjectGenerationResult:
+    """
+    Unified service that handles the entire project generation flow:
+    1. Generate BRD from business requirements
+    2. Generate project files
+    3. Validate and debug
+    4. Create zip file
+    5. Return comprehensive results
+    """
+    start_time = datetime.utcnow()
+
+    try:
+        # Step 1: Generate BRD from business requirements
+        print("=== Step 1: Generating BRD from business requirements ===")
+        brd_data = await generate_brd_from_text_with_ai(request.businessRequirement)
+
+        # Override project name if provided
+        if request.projectName:
+            brd_data.projectName = request.projectName
+
+        # Add additional instructions if provided
+        if request.additionalInstructions:
+            current_additional = brd_data.additionalRequirements or ""
+            brd_data.additionalRequirements = f"{current_additional}\n\nAdditional Instructions: {request.additionalInstructions}".strip()
+
+        print(f"Generated BRD for project: {brd_data.projectName}")
+
+        # Step 2: Improve BRD with AI
+        print("=== Step 2: Improving BRD with AI ===")
+        improved_brd = await improve_brd_with_ai(brd_data)
+
+        # Step 3: Generate repository files
+        print("=== Step 3: Generating repository files ===")
+        project_path = await generate_repository_files(improved_brd)
+        project_path_obj = Path(project_path)
+
+        # Step 4: Count generated files
+        total_files = sum(1 for _ in project_path_obj.rglob('*') if _.is_file())
+
+        # Step 5: Load validation report if exists
+        validation_report = None
+        validation_report_path = project_path_obj / "validation_report.json"
+        if validation_report_path.exists():
+            try:
+                with open(validation_report_path, 'r') as f:
+                    validation_data = json.loads(f.read())
+                    validation_report = models.ValidationReport.model_validate(validation_data)
+            except Exception as e:
+                print(f"Could not load validation report: {e}")
+
+        # Step 6: Create zip file
+        print("=== Step 4: Creating zip file ===")
+        project_name_slug = improved_brd.projectName.lower().replace(" ", "-").replace(r"[^a-z0-9-]", "")
+        zip_path = create_project_zip(project_path_obj, f"{project_name_slug}-generated")
+
+        # Step 7: Calculate metrics
+        end_time = datetime.utcnow()
+        generation_time = (end_time - start_time).total_seconds()
+
+        # Extract debug attempts from potential debug session
+        debug_attempts = 0
+        debug_session_path = project_path_obj / "debug_session.json"
+        if debug_session_path.exists():
+            try:
+                with open(debug_session_path, 'r') as f:
+                    debug_data = json.loads(f.read())
+                    debug_attempts = len(debug_data.get("attempts", []))
+            except Exception:
+                pass
+
+        # Extract AI agent calls count
+        ai_calls_count = 0
+        session_path = project_path_obj / "generation_session.json"
+        if session_path.exists():
+            try:
+                with open(session_path, 'r') as f:
+                    session_data = json.loads(f.read())
+                    ai_calls_count = len(session_data.get("agent_calls", []))
+            except Exception:
+                pass
+
+        print(f"=== Project Generation Completed Successfully ===")
+        print(f"Project: {improved_brd.projectName}")
+        print(f"Files generated: {total_files}")
+        print(f"Generation time: {generation_time:.2f} seconds")
+        print(f"Zip file: {zip_path}")
+
+        return models.ProjectGenerationResult(
+            success=True,
+            project_name=improved_brd.projectName,
+            brd_data=improved_brd,
+            zip_file_path=zip_path,
+            generation_time_seconds=generation_time,
+            validation_report=validation_report,
+            debug_attempts=debug_attempts,
+            total_files_generated=total_files,
+            ai_agent_calls=ai_calls_count
+        )
+
+    except Exception as e:
+        end_time = datetime.utcnow()
+        generation_time = (end_time - start_time).total_seconds()
+
+        print(f"Error in unified project generation: {e}")
+
+        # Determine which stage failed
+        stage = "brd_generation"
+        if 'brd_data' in locals():
+            stage = "repository_generation"
+        if 'project_path' in locals():
+            stage = "validation"
+        if 'zip_path' in locals():
+            stage = "finalization"
+
+        raise Exception(f"Project generation failed at {stage}: {str(e)}")
