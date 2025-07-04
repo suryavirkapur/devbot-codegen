@@ -1,9 +1,9 @@
 from celery import Celery
 import asyncio
 
-import services
-import models
-import config
+from . import services
+from . import models
+from . import config
 
 celery_app = Celery(
     __name__,

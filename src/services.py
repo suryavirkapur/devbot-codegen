@@ -9,8 +9,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import TypeVar, Type, List, Dict, Optional, Tuple
 from openai import OpenAI, AzureOpenAI
-import config
-import models
+from . import config
+from . import models
+from .advanced_debugging import (
+    LanguageDetector, ErrorAnalyzer, TestStrategyManager, 
+    ParallelTestExecutor, LearningSystem, CheckpointManager, QualityAssessor
+)
 
 if os.getenv("AZURE_OPENAI_ENDPOINT"): # Example condition to use Azure
     client = AzureOpenAI(
@@ -76,6 +80,46 @@ async def generate_code_from_prompt(prompt: str, model_name: str = config.DEFAUL
     except Exception as e:
         print(f"Error in generate_code_from_prompt: {e}")
         raise
+
+async def get_embedding(text: str, model: str = "nomic-embed-text") -> List[float]:
+    """
+    Generates an embedding for a given text using the configured OpenAI client.
+    """
+    try:
+        # Normalize newlines to avoid issues with some models
+        text = text.replace("\n", " ")
+        response = client.embeddings.create(
+            input=[text],
+            model=model
+        )
+        return response.data[0].embedding
+    except Exception as e:
+        print(f"Error getting embedding for text: '{text[:100]}...': {e}")
+        raise
+
+async def summarize_code_chunk(chunk_text: str, file_path: str, language: str, model_name: str = config.DEFAULT_MODEL) -> str:
+    """
+    Generates a summary for a code chunk using an LLM.
+    """
+    prompt = f"""
+    Please provide a concise, one-sentence summary of the following code snippet.
+    The snippet is from the file '{file_path}' and is written in {language}.
+    Focus on the primary purpose or action of the code.
+
+    Code Snippet:
+    ```
+    {chunk_text}
+    ```
+
+    One-sentence summary:
+    """
+    try:
+        # Re-using generate_code_from_prompt as it's a simple text generation task
+        summary = await generate_code_from_prompt(prompt, model_name=model_name)
+        return summary.strip()
+    except Exception as e:
+        print(f"Error summarizing chunk from {file_path}: {e}")
+        return "Could not generate summary."
 
 async def summarize_file_content(file_path: str, content: str, model_name: str = config.DEFAULT_MODEL) -> str:
     """
@@ -258,124 +302,155 @@ async def run_docker_based_tests(project_path: Path, project_slug: str) -> Tuple
         return False, logs
 
 
-async def enhanced_debug_code_with_ai(project_path: Path, brd_data: models.BRDCreatePayload,
-                                     error_logs: str, debug_session: models.DebugSession,
-                                     session: models.MultiAgentSession) -> List[str]:
+async def advanced_debug_with_ai(project_path: Path, brd_data: models.BRDCreatePayload,
+                                error_logs: str, advanced_debug_session: models.AdvancedDebugSession,
+                                session: models.MultiAgentSession) -> List[str]:
     """
-    Enhanced debugging with attempt tracking, previous attempt summarization, and multiple AI strategies.
+    Advanced AI debugging with language detection, error classification, parallel testing, and learning.
     Returns list of modified file paths.
     """
-    print(f"\n--- Enhanced AI Debugging - Attempt {debug_session.current_attempt + 1} ---")
+    print(f"\n--- Advanced AI Debugging - Attempt {advanced_debug_session.current_attempt + 1} ---")
 
-    # Read all project files
-    project_files = {}
-    for root, _, files in os.walk(project_path):
-        for file in files:
-            if ".venv" in root or "__pycache__" in root or file == ".DS_Store":
-                continue
-            file_path = Path(root) / file
-            relative_path = file_path.relative_to(project_path)
-            try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    project_files[str(relative_path)] = f.read()
-            except Exception as e:
-                print(f"Warning: Could not read file {file_path}: {e}")
+    # Initialize systems
+    learning_system = LearningSystem()
+    checkpoint_manager = CheckpointManager(project_path)
+    
+    # Create checkpoint before debugging
+    checkpoint = await checkpoint_manager.create_checkpoint(
+        f"Before debug attempt {advanced_debug_session.current_attempt + 1}"
+    )
 
-    # Create summary of previous attempts
-    previous_attempts_summary = ""
-    if debug_session.attempts:
-        previous_attempts_summary = "\n\n**Previous Debugging Attempts:**\n"
-        for attempt in debug_session.attempts:
-            previous_attempts_summary += f"- Attempt {attempt.attempt_number}: {attempt.strategy_used} -> {'SUCCESS' if attempt.success else 'FAILED'}\n"
-            previous_attempts_summary += f"  Files modified: {', '.join(attempt.files_modified)}\n"
-            if not attempt.success:
-                previous_attempts_summary += f"  Error: {attempt.error_logs[:500]}...\n"
+    # Detect technology stack if not already done
+    if not advanced_debug_session.tech_stack:
+        print("Detecting technology stack...")
+        tech_stack = await LanguageDetector.detect_tech_stack(project_path)
+        advanced_debug_session.tech_stack = tech_stack
+        print(f"Detected: {tech_stack.primary_language.language} with frameworks: {[f.name for f in tech_stack.frameworks]}")
+    else:
+        tech_stack = advanced_debug_session.tech_stack
 
-    # Prepare files content
-    files_str = "\n\n".join([f"### `/{path}`\n\n```\n{content}\n```" for path, content in project_files.items()])
+    # Analyze errors
+    print("Analyzing errors...")
+    error_analyses = await ErrorAnalyzer.analyze_errors(error_logs, tech_stack)
+    
+    # Find applicable learning patterns
+    applicable_patterns = []
+    for error_analysis in error_analyses:
+        patterns = learning_system.find_applicable_patterns(error_analysis, tech_stack)
+        applicable_patterns.extend(patterns)
+    
+    print(f"Found {len(applicable_patterns)} applicable learning patterns")
 
-    # Enhanced debugging prompt with multiple strategies
-    debug_strategies = [
-        "dependency_fix",  # Focus on package/dependency issues
-        "dockerfile_optimization",  # Focus on Dockerfile issues
-        "code_compilation",  # Focus on source code compilation errors
-        "configuration_fix",  # Focus on configuration files
-        "multi_stage_analysis"  # Comprehensive analysis of all aspects
-    ]
+    # Get testing strategies
+    strategies = TestStrategyManager.get_language_strategies(tech_stack)
+    
+    # Create parallel execution plan
+    execution_plan = models.ParallelTestExecution(
+        strategies=strategies[:5],  # Use top 5 strategies
+        max_parallel=3,
+        timeout=300
+    )
 
-    current_strategy = debug_strategies[min(debug_session.current_attempt, len(debug_strategies) - 1)]
+    # Execute strategies in parallel
+    print(f"Executing {len(execution_plan.strategies)} strategies in parallel...")
+    test_results = await ParallelTestExecutor.execute_parallel_strategies(
+        project_path, execution_plan, tech_stack
+    )
 
-    strategy_prompts = {
-        "dependency_fix": "Focus on fixing package dependencies, version conflicts, and package manager files (requirements.txt, package.json, go.mod, etc.)",
-        "dockerfile_optimization": "Focus on optimizing the Dockerfile, fixing base image issues, and container build problems",
-        "code_compilation": "Focus on fixing source code compilation errors, syntax errors, and import issues",
-        "configuration_fix": "Focus on fixing configuration files, environment variables, and application settings",
-        "multi_stage_analysis": "Perform a comprehensive analysis of all potential issues including dependencies, Dockerfile, source code, and configuration"
-    }
-
-    debug_prompt = f"""
-    You are an expert debugging agent specializing in {current_strategy}. The Docker build for this generated project failed.
-
-    **Current Strategy:** {strategy_prompts[current_strategy]}
-
-    **Docker Build Error Logs:**
-    ```
-    {error_logs}
-    ```
-
-    {previous_attempts_summary}
-
-    **Project BRD (for context):**
-    {brd_data.model_dump_json(indent=2)}
-
-    **Project Files:**
-    {files_str}
-
-    Based on your specialized analysis and the previous attempts, provide targeted file updates to fix the build.
-    Be specific about what strategy you're applying and why it should work better than previous attempts.
-
-    Return the result as a JSON object matching the `DebuggingUpdate` schema.
-    """
-
-    try:
-        # Call specialized debugging agent
-        updates_response, agent_call = await call_ai_agent(
-            agent_type=f"debugger_{current_strategy}",
-            prompt=debug_prompt,
-            response_model=models.DebuggingUpdate,
-            session=session
-        )
-
+    # Find the best result
+    successful_results = [r for r in test_results if r.success]
+    best_result = None
+    
+    if successful_results:
+        # Sort by confidence score
+        best_result = max(successful_results, key=lambda r: r.confidence_score)
+        print(f"Best successful strategy: {best_result.strategy_id} (confidence: {best_result.confidence_score:.2f})")
+        
+        # Mark checkpoint as working if we have a successful result
+        if best_result.confidence_score > 0.7:
+            await checkpoint_manager.create_checkpoint(
+                f"Working state after successful {best_result.strategy_id}",
+                working_state=True
+            )
+    else:
+        # No successful strategies, try AI-based fixes
+        print("No strategies succeeded, applying AI-based fixes...")
+        
+        # Apply patterns from learning system
         modified_files = []
-        if updates_response.updates:
-            for file_update in updates_response.updates:
-                file_path = project_path / file_update.path
-                print(f"Applying {current_strategy} fix to: {file_path}")
-                if file_path.parent.exists():
-                    with open(file_path, "w", encoding="utf-8") as f:
-                        f.write(file_update.updatedCode)
-                    modified_files.append(file_update.path)
+        for pattern in applicable_patterns[:3]:  # Try top 3 patterns
+            try:
+                for change in pattern.code_changes:
+                    if 'file_path' in change and 'content' in change:
+                        file_path = project_path / change['file_path']
+                        if file_path.exists():
+                            with open(file_path, 'w', encoding='utf-8') as f:
+                                f.write(change['content'])
+                            modified_files.append(change['file_path'])
+                            print(f"Applied learning pattern to {change['file_path']}")
+                
+                # Test if this pattern worked
+                success, test_output = await run_docker_based_tests(
+                    project_path, project_path.name
+                )
+                
+                if success:
+                    learning_system.learn_from_success(error_analyses[0], [change], tech_stack)
+                    best_result = models.TestResult(
+                        strategy_id=f"learning_pattern_{pattern.pattern_id}",
+                        success=True,
+                        execution_time=0,
+                        output=test_output,
+                        files_modified=modified_files,
+                        confidence_score=0.8
+                    )
+                    break
                 else:
-                    print(f"Warning: Parent directory for {file_path} does not exist. Skipping update.")
+                    learning_system.learn_from_failure(pattern.pattern_id)
+                    # Rollback changes
+                    await checkpoint_manager.rollback_to_checkpoint(checkpoint.checkpoint_id)
+                    
+            except Exception as e:
+                print(f"Error applying pattern {pattern.pattern_id}: {e}")
+                learning_system.learn_from_failure(pattern.pattern_id)
 
-        # Record the attempt
-        attempt = models.DebugAttempt(
-            attempt_number=debug_session.current_attempt + 1,
-            error_logs=error_logs,
-            strategy_used=current_strategy,
-            files_modified=modified_files,
-            success=False  # Will be updated after testing
-        )
-        debug_session.attempts.append(attempt)
-        debug_session.current_attempt += 1
-
-        return modified_files
-
+    # Record the debug attempt
+    attempt = models.AdvancedDebugAttempt(
+        attempt_number=advanced_debug_session.current_attempt + 1,
+        tech_stack=tech_stack,
+        error_analysis=error_analyses,
+        strategies_attempted=test_results,
+        best_result=best_result,
+        checkpoint_created=checkpoint.checkpoint_id,
+        learning_applied=[p.pattern_id for p in applicable_patterns],
+        success=best_result is not None and best_result.success
+    )
+    
+    advanced_debug_session.attempts.append(attempt)
+    advanced_debug_session.current_attempt += 1
+    
+    # Save debug session state
+    try:
+        session_data = advanced_debug_session.model_dump()
+        with open(project_path / "advanced_debug_session.json", "w") as f:
+            json.dump(session_data, f, indent=2, default=str)
     except Exception as e:
-        print(f"Enhanced debugging failed with exception: {e}")
-        raise
+        print(f"Warning: Could not save debug session: {e}")
 
-async def generate_repository_files(brd_data: models.BRDCreatePayload) -> str:
+    if best_result and best_result.success:
+        print(f"Debug attempt successful with strategy: {best_result.strategy_id}")
+        
+        # Learn from successful attempt if it was an AI-generated fix
+        if error_analyses and not best_result.strategy_id.startswith("learning_pattern"):
+            changes = [{'strategy': best_result.strategy_id, 'files': best_result.files_modified}]
+            learning_system.learn_from_success(error_analyses[0], changes, tech_stack)
+        
+        return best_result.files_modified
+    else:
+        print("Debug attempt failed - no successful strategies found")
+        return []
+
+async def generate_repository_files(brd_data: models.BRDCreatePayload, session: models.MultiAgentSession) -> str:
     project_name_slug = brd_data.projectName.lower().replace(" ", "-").replace(r"[^a-z0-9-]", "")
     if not project_name_slug:
         raise ValueError("Project name is invalid or results in an empty slug.")
@@ -391,11 +466,9 @@ async def generate_repository_files(brd_data: models.BRDCreatePayload) -> str:
     project_path.mkdir(parents=True)
     print(f"Created project directory: {project_path}")
 
-    # Initialize multi-agent session for tracking
-    session = models.MultiAgentSession(
-        project_context=f"Repository generation for: {brd_data.projectName}",
-        current_phase="generation"
-    )
+    # Update session context
+    session.project_context = f"Repository generation for: {brd_data.projectName}"
+    session.current_phase="generation"
 
     # Step 1: Generate project file structure with dependencies using AI agent
     structure_prompt = f"""
@@ -498,45 +571,84 @@ async def generate_repository_files(brd_data: models.BRDCreatePayload) -> str:
         print(f"Successfully created file: {full_file_path}")
         generated_file_contents[file_info.path] = file_content
 
-    # Step 4: Enhanced Debug Loop with Attempt Tracking
+    # Step 4: Advanced Debug Loop with Multi-Strategy Testing and Learning
     session.current_phase = "debugging"
-    debug_session = models.DebugSession(
+    
+    # Initialize advanced debug session
+    checkpoint_manager = CheckpointManager(project_path)
+    initial_checkpoint = await checkpoint_manager.create_checkpoint("Initial project state", working_state=False)
+    
+    advanced_debug_session = models.AdvancedDebugSession(
         project_path=str(project_path),
-        max_attempts=5
+        rollback_manager=checkpoint_manager.rollback_manager,
+        learning_session=models.LearningSession(project_context=f"Project: {brd_data.projectName}"),
+        max_attempts=10  # Increased attempts due to more sophisticated debugging
     )
 
-    while debug_session.current_attempt < debug_session.max_attempts:
-        attempt_num = debug_session.current_attempt + 1
-        print(f"\n--- Docker Build & Debug Cycle: Attempt {attempt_num}/{debug_session.max_attempts} ---")
+    while advanced_debug_session.current_attempt < advanced_debug_session.max_attempts:
+        attempt_num = advanced_debug_session.current_attempt + 1
+        print(f"\n--- Advanced Docker Build & Debug Cycle: Attempt {attempt_num}/{advanced_debug_session.max_attempts} ---")
 
         success, logs = await run_docker_based_tests(project_path, project_name_slug)
         print(logs)
 
         if success:
             # Mark the last attempt as successful if there were any
-            if debug_session.attempts:
-                debug_session.attempts[-1].success = True
+            if advanced_debug_session.attempts:
+                advanced_debug_session.attempts[-1].success = True
 
+            # Create final working checkpoint
+            await checkpoint_manager.create_checkpoint("Final working state", working_state=True)
+            
             print("\n--- Docker build successful! Moving to validation phase. ---")
             break
 
-        print("\n--- Docker build failed. Initiating enhanced AI debugging... ---")
+        print("\n--- Docker build failed. Initiating advanced AI debugging... ---")
 
-        if debug_session.current_attempt < debug_session.max_attempts - 1:
+        if advanced_debug_session.current_attempt < advanced_debug_session.max_attempts - 1:
             try:
-                modified_files = await enhanced_debug_code_with_ai(
-                    project_path, brd_data, logs, debug_session, session
+                modified_files = await advanced_debug_with_ai(
+                    project_path, brd_data, logs, advanced_debug_session, session
                 )
                 print(f"Modified {len(modified_files)} files in this debug attempt")
+                
+                # If no files were modified and we have working checkpoints, try rolling back
+                if not modified_files:
+                    latest_working = checkpoint_manager.get_latest_working_checkpoint()
+                    if latest_working:
+                        print("No modifications applied, rolling back to latest working state...")
+                        await checkpoint_manager.rollback_to_checkpoint(latest_working.checkpoint_id)
+                        
             except Exception as e:
-                print(f"AI debugging failed with an exception: {e}. Retrying...")
+                print(f"Advanced AI debugging failed with an exception: {e}. Retrying...")
+                # Try to rollback to a working state if available
+                latest_working = checkpoint_manager.get_latest_working_checkpoint()
+                if latest_working:
+                    print("Rolling back to latest working checkpoint due to debugging error...")
+                    await checkpoint_manager.rollback_to_checkpoint(latest_working.checkpoint_id)
         else:
             print("\n--- Maximum debugging retries reached. ---")
-            # Generate final debugging report
-            print("\n--- Debug Session Summary ---")
-            for attempt in debug_session.attempts:
-                print(f"Attempt {attempt.attempt_number}: {attempt.strategy_used} -> {'SUCCESS' if attempt.success else 'FAILED'}")
-            raise Exception("Failed to generate a working project after multiple Docker build attempts.")
+            # Generate comprehensive debugging report
+            print("\n--- Advanced Debug Session Summary ---")
+            for attempt in advanced_debug_session.attempts:
+                print(f"Attempt {attempt.attempt_number}: {len(attempt.strategies_attempted)} strategies -> {'SUCCESS' if attempt.success else 'FAILED'}")
+                if attempt.best_result:
+                    print(f"  Best strategy: {attempt.best_result.strategy_id} (confidence: {attempt.best_result.confidence_score:.2f})")
+                print(f"  Learning patterns applied: {len(attempt.learning_applied)}")
+            
+            # Try one final rollback to the latest working state
+            latest_working = checkpoint_manager.get_latest_working_checkpoint()
+            if latest_working:
+                print(f"Final attempt: Rolling back to working checkpoint: {latest_working.description}")
+                await checkpoint_manager.rollback_to_checkpoint(latest_working.checkpoint_id)
+                
+                # Test one more time
+                success, logs = await run_docker_based_tests(project_path, project_name_slug)
+                if success:
+                    print("Rollback to working state successful!")
+                    break
+            
+            raise Exception("Failed to generate a working project after advanced debugging attempts.")
 
     # Step 5: Validation Phase with AI Agent
     session.current_phase = "validation"
@@ -648,7 +760,7 @@ async def create_validation_plan(project_path: Path, brd_data: models.BRDCreateP
             except Exception as e:
                 print(f"Warning: Could not read file {file_path}: {e}")
 
-    files_str = "\n\n".join([f"### `/{path}`\n\n```\n{content[:1000]}...\n```"
+    files_str = "\n\n".join([f"### `/{path}`\n\n```\n{content[:2000]}...\n```"
                            for path, content in project_files.items()])
 
     validation_prompt = f"""
@@ -845,6 +957,11 @@ async def unified_project_generation(request: models.UnifiedProjectRequest) -> m
     5. Return comprehensive results
     """
     start_time = datetime.utcnow()
+    session = models.MultiAgentSession(
+        project_context=f"Initial context for {request.projectName or 'new project'}",
+    )
+    project_path = None
+
 
     try:
         # Step 1: Generate BRD from business requirements
@@ -868,7 +985,7 @@ async def unified_project_generation(request: models.UnifiedProjectRequest) -> m
 
         # Step 3: Generate repository files
         print("=== Step 3: Generating repository files ===")
-        project_path = await generate_repository_files(improved_brd)
+        project_path = await generate_repository_files(improved_brd, session)
         project_path_obj = Path(project_path)
 
         # Step 4: Count generated files
@@ -890,37 +1007,51 @@ async def unified_project_generation(request: models.UnifiedProjectRequest) -> m
         project_name_slug = improved_brd.projectName.lower().replace(" ", "-").replace(r"[^a-z0-9-]", "")
         zip_path = create_project_zip(project_path_obj, f"{project_name_slug}-generated")
 
-        # Step 7: Calculate metrics
+        # Step 7: Advanced Quality Assessment
+        print("=== Step 7: Performing advanced quality assessment ===")
+        
+        # Detect tech stack for final assessment
+        tech_stack_detected = await LanguageDetector.detect_tech_stack(project_path_obj)
+        
+        # Assess project health
+        project_health = await QualityAssessor.assess_project_health(project_path_obj, tech_stack_detected)
+        
+        # Step 8: Calculate metrics
         end_time = datetime.utcnow()
         generation_time = (end_time - start_time).total_seconds()
 
-        # Extract debug attempts from potential debug session
+        # Extract advanced debug session data
         debug_attempts = 0
-        debug_session_path = project_path_obj / "debug_session.json"
-        if debug_session_path.exists():
+        advanced_debug_session_data = None
+        advanced_debug_session_path = project_path_obj / "advanced_debug_session.json"
+        if advanced_debug_session_path.exists():
             try:
-                with open(debug_session_path, 'r') as f:
+                with open(advanced_debug_session_path, 'r') as f:
                     debug_data = json.loads(f.read())
                     debug_attempts = len(debug_data.get("attempts", []))
-            except Exception:
-                pass
+                    advanced_debug_session_data = models.AdvancedDebugSession.model_validate(debug_data)
+            except Exception as e:
+                print(f"Warning: Could not load advanced debug session: {e}")
 
         # Extract AI agent calls count
-        ai_calls_count = 0
-        session_path = project_path_obj / "generation_session.json"
-        if session_path.exists():
-            try:
-                with open(session_path, 'r') as f:
-                    session_data = json.loads(f.read())
-                    ai_calls_count = len(session_data.get("agent_calls", []))
-            except Exception:
-                pass
+        ai_calls_count = len(session.agent_calls) if session else 0
 
-        print(f"=== Project Generation Completed Successfully ===")
+        print(f"=== Advanced Project Generation Completed Successfully ===")
         print(f"Project: {improved_brd.projectName}")
+        print(f"Primary Language: {tech_stack_detected.primary_language.language}")
+        print(f"Frameworks: {[f.name for f in tech_stack_detected.frameworks]}")
         print(f"Files generated: {total_files}")
         print(f"Generation time: {generation_time:.2f} seconds")
+        print(f"Debug attempts: {debug_attempts}")
+        print(f"Project health score: {project_health.overall_health:.1f}/100")
+        print(f"Build success: {'✅' if project_health.build_success else '❌'}")
+        print(f"Tests passing: {'✅' if project_health.tests_passing else '❌'}")
         print(f"Zip file: {zip_path}")
+        
+        if project_health.recommendations:
+            print("Recommendations for improvement:")
+            for rec in project_health.recommendations[:3]:  # Show top 3
+                print(f"  • {rec}")
 
         return models.ProjectGenerationResult(
             success=True,
@@ -931,7 +1062,10 @@ async def unified_project_generation(request: models.UnifiedProjectRequest) -> m
             validation_report=validation_report,
             debug_attempts=debug_attempts,
             total_files_generated=total_files,
-            ai_agent_calls=ai_calls_count
+            ai_agent_calls=ai_calls_count,
+            tech_stack_detected=tech_stack_detected,
+            project_health=project_health,
+            advanced_debug_session=advanced_debug_session_data
         )
 
     except Exception as e:

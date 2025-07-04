@@ -3,9 +3,11 @@ from robyn import Robyn, Request, serve_file
 from pydantic import ValidationError
 from pathlib import Path
 import json
+from robyn.robyn import Response
+from celery.result import AsyncResult
 
-import models
-from worker import celery_app, generate_project_task
+from . import models
+from .worker import celery_app, generate_project_task
 
 app = Robyn(__file__)
 

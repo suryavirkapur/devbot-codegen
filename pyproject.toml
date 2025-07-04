@@ -12,4 +12,5 @@ dependencies = [
     "robyn>=0.68.0",
     "celery>=5.3.6",
     "redis>=5.0.4",
+    "qdrant-client>=1.14.3",
 ]
